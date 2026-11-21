@@ -1,0 +1,69 @@
+# FFmpeg for Windows (win64), LGPL only: FFmpeg-Builds' "lgpl" recipe at a pinned commit with the three stages that
+# bring GPL code into it left out — 25-fftw3 (FFTW, GPL-2.0-or-later, came in through Chromaprint), 50-chromaprint and
+# 50-zvbi (two GPL-2.0-only files, through the teletext decoder). FFmpeg is configured with --disable-chromaprint
+# --disable-libzvbi, --enable-version3, no --enable-gpl, no --enable-nonfree. FFmpeg at commit 1019f8f036, extra
+# version 20260824. Manual start only. The result is an artifact; nothing is published from here.
+name: Build FFmpeg win64 LGPL
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  FFB_COMMIT: a1b5c414d3c53f5abf5baf73df9607cdf77bb46a
+  FFMPEG_COMMIT: 1019f8f036602a8464185baa4857654337eeca14
+jobs:
+  build:
+    name: Build win64 lgpl without chromaprint, fftw3, zvbi
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: self
+      - name: Free disk
+        run: bash self/scripts/free-disk.sh
+      - name: FFmpeg-Builds at the pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: FFmpeg-Builds/FFmpeg-Builds
+          ref: a1b5c414d3c53f5abf5baf73df9607cdf77bb46a
+          path: ffb
+      - name: Leave out chromaprint, fftw3 and zvbi; pin FFmpeg; no builder cache, only the final image exported
+        working-directory: ffb
+        run: bash ../self/scripts/patch-ffmpeg-builds.sh
+      - name: Build the image (the cross compiler and every library)
+        working-directory: ffb
+        env:
+          NOCLEAN: '1'
+        run: |
+          ( while sleep 600; do echo "== $(date -u +%H:%M) disk"; df -h / /mnt 2>/dev/null | tail -n +2; done ) &
+          ./makeimage-lgpl.sh win64 lgpl
+      - name: Remove the builder (the image is in Docker now)
+        run: |
+          docker buildx rm -f ffbuilder || true
+          docker image ls
+          df -h / /mnt 2>/dev/null || df -h /
+      - name: Build FFmpeg
+        working-directory: ffb
+        run: ./build.sh win64 lgpl
+      - name: Gate 1 — the file
+        working-directory: ffb
+        run: |
+          set -euo pipefail
+          ls -la artifacts
+          ZIP=$(ls artifacts/*.zip | head -1)
+          mkdir -p out && cd out && unzip -q "../$ZIP" && cd ..
+          EXE=$(find out -name ffmpeg.exe | head -1)
+          cp "$EXE" ffmpeg.exe
+          bash ../self/scripts/gate1.sh ffmpeg.exe gate1
+      - name: Keep the binary and its record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-win64-lgpl
+          path: |
+            ffb/artifacts/*.zip
+            ffb/ffmpeg.exe
+            ffb/gate1/
+          retention-days: 90
+          if-no-files-found: warn

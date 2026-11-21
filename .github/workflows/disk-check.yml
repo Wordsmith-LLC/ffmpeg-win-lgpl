@@ -1,0 +1,22 @@
+# A short run of the disk step only (before the long build): how much room the build will have.
+name: Disk check
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disk:
+    name: Free the runner's disk and report the room
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk
+        run: bash scripts/free-disk.sh
+      - name: Docker works on the chosen disk
+        run: |
+          docker run --rm ubuntu:26.04 true
+          docker buildx create --name probe --driver docker-container --bootstrap >/dev/null
+          docker buildx rm probe
+          echo "free for the build: ${DOCKER_FREE_GB} GB"
+          test "${DOCKER_FREE_GB}" -ge 60
